@@ -115,21 +115,8 @@ npm start
 - **Product Design**: `docs/product_design.md`
 - **AI Logic**: `docs/intelligence_layer.md`
 - **Validation Plan**: `docs/validation_plan.md`
-- **Submission Doc**: `DELIVERABLE.md`
 
 ---
-
-## 🎯 For the Productathon Submission
-
-**Required deliverable:** PDF explaining the solution
-
-**What to submit:**
-1. Convert `DELIVERABLE.md` to PDF (includes all sections)
-2. Or create slide deck using content from:
-   - `docs/problem_breakdown.md`
-   - `docs/product_design.md`
-   - `docs/intelligence_layer.md`
-   - `docs/validation_plan.md`
 
 **Live demo:**
 - Use demo mode (instant) OR
