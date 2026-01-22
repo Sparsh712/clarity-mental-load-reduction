@@ -252,7 +252,7 @@ class NotificationManager {
 
         let badgeHTML = '';
         if (isUrgent) {
-            badgeHTML = '<span class="notification-badge urgent">Show Now</span>';
+            badgeHTML = '<button class="notification-badge urgent show-now-btn">Show Now</button>';
         } else if (isDeferred) {
             badgeHTML = '<span class="notification-badge deferred">Digest</span>';
         }
@@ -263,7 +263,102 @@ class NotificationManager {
             ${badgeHTML}
         `;
 
+        // Add click handler for "Show Now" button
+        if (isUrgent) {
+            const showNowBtn = div.querySelector('.show-now-btn');
+            showNowBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.showNotificationModal(notification);
+            });
+        }
+
         return div;
+    }
+
+    showNotificationModal(notification) {
+        // Remove existing modal if any
+        const existingModal = document.querySelector('.notification-modal-overlay');
+        if (existingModal) existingModal.remove();
+
+        // Create modal overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'notification-modal-overlay';
+
+        // Format the notification details
+        const snippet = notification.snippet || notification.content;
+        const timestamp = notification.timestamp ? new Date(notification.timestamp).toLocaleString() : 'Just now';
+        const urgencyPercent = Math.round((notification.urgency || 0.8) * 100);
+
+        overlay.innerHTML = `
+            <div class="notification-modal">
+                <div class="modal-header">
+                    <div class="modal-urgency-badge">🔴 URGENT (${urgencyPercent}%)</div>
+                    <button class="modal-close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-sender">
+                        <strong>From:</strong> ${notification.sender}
+                    </div>
+                    <div class="modal-subject">
+                        <strong>Subject:</strong> ${notification.content}
+                    </div>
+                    <div class="modal-time">
+                        <strong>Time:</strong> ${timestamp}
+                    </div>
+                    <div class="modal-preview">
+                        <strong>Preview:</strong>
+                        <p>${snippet}</p>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn-primary modal-action-btn" data-action="open">Open Full Email</button>
+                    <button class="btn-secondary modal-action-btn" data-action="snooze">Snooze 1hr</button>
+                    <button class="btn-secondary modal-action-btn" data-action="dismiss">Dismiss</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        // Add event listeners
+        const closeBtn = overlay.querySelector('.modal-close-btn');
+        closeBtn.addEventListener('click', () => overlay.remove());
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) overlay.remove();
+        });
+
+        // Action buttons
+        overlay.querySelectorAll('.modal-action-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const action = e.target.dataset.action;
+                if (action === 'open') {
+                    // Try to open the email in Gmail
+                    const emailData = notification.emailData;
+                    // Use authuser param with email to handle multiple Gmail accounts
+                    const authParam = userEmail ? `?authuser=${encodeURIComponent(userEmail)}` : '';
+
+                    if (emailData && emailData.id) {
+                        // Open Gmail with the specific message
+                        const gmailUrl = `https://mail.google.com/mail${authParam}#inbox/${emailData.id}`;
+                        window.open(gmailUrl, '_blank');
+                    } else if (emailData && emailData.threadId) {
+                        // Fallback to thread URL
+                        const gmailUrl = `https://mail.google.com/mail${authParam}#inbox/${emailData.threadId}`;
+                        window.open(gmailUrl, '_blank');
+                    } else {
+                        // For demo emails, just open Gmail inbox
+                        window.open(`https://mail.google.com/mail${authParam}#inbox`, '_blank');
+                    }
+                } else if (action === 'snooze') {
+                    alert('Snoozed for 1 hour! Will remind you later.');
+                } else if (action === 'dismiss') {
+                    statsCounter.decisionsHandled++;
+                    this.updateStats();
+                }
+                overlay.remove();
+            });
+        });
     }
 
     updateStats() {
@@ -629,25 +724,76 @@ class EmailIntegration {
     calculateEmailUrgency(email) {
         let score = 0.3; // Base score for emails
 
-        // Check if important
-        if (email.isImportant) score += 0.3;
+        const subjectLower = email.subject.toLowerCase();
+        const snippetLower = (email.snippet || '').toLowerCase();
+        const combinedText = `${subjectLower} ${snippetLower}`;
+
+        // Check if important (Gmail's own classification)
+        if (email.isImportant) score += 0.25;
 
         // Check if unread
-        if (email.isUnread) score += 0.2;
+        if (email.isUnread) score += 0.15;
 
-        // Check for urgent keywords in subject
-        const urgentKeywords = ['urgent', 'asap', 'important', 'critical', 'emergency', 're:', 'fwd:'];
-        const subjectLower = email.subject.toLowerCase();
-        if (urgentKeywords.some(keyword => subjectLower.includes(keyword))) {
-            score += 0.3;
+        // HIGH PRIORITY KEYWORDS - Invitations, Events, Deadlines
+        const highPriorityKeywords = [
+            'invitation', 'invite', 'invited', 'inviting',
+            'event', 'meeting', 'conference', 'summit', 'finals',
+            'registration', 'register', 'enrolled', 'enrollment',
+            'deadline', 'due date', 'expires', 'expiring', 'last day',
+            'action needed', 'action required', 'response required', 'response needed',
+            'confirm', 'confirmation', 'rsvp', 'attend', 'attending',
+            'selected', 'finalist', 'shortlisted', 'qualified', 'congratulations',
+            'offer', 'acceptance', 'accepted', 'approved',
+            'interview', 'schedule', 'reschedule',
+            'payment due', 'payment required', 'pay now',
+            'verify', 'verification required'
+        ];
+
+        // Check for high priority keywords
+        const highPriorityMatch = highPriorityKeywords.filter(keyword => combinedText.includes(keyword));
+        if (highPriorityMatch.length > 0) {
+            score += 0.3 + (Math.min(highPriorityMatch.length, 3) * 0.1); // More matches = higher priority
         }
 
-        // Check sender (simple heuristic)
-        if (email.senderEmail.includes('noreply') || email.senderEmail.includes('no-reply')) {
-            score -= 0.3; // Likely automated
+        // URGENT KEYWORDS
+        const urgentKeywords = [
+            'urgent', 'asap', 'important', 'critical', 'emergency',
+            'immediately', 'today', 'now', 'right away',
+            'time sensitive', 'time-sensitive'
+        ];
+
+        if (urgentKeywords.some(keyword => combinedText.includes(keyword))) {
+            score += 0.25;
         }
 
-        return Math.min(score, 1.0);
+        // Reply/Forward indicators suggest ongoing conversation
+        if (subjectLower.startsWith('re:') || subjectLower.startsWith('fwd:')) {
+            score += 0.1;
+        }
+
+        // LOWER PRIORITY - Automated/Marketing emails
+        const lowPriorityIndicators = [
+            'unsubscribe', 'newsletter', 'digest', 'weekly update',
+            'promotional', 'sale', 'discount', 'deal', 'offer expires',
+            'sponsored', 'advertisement'
+        ];
+
+        if (lowPriorityIndicators.some(keyword => combinedText.includes(keyword))) {
+            score -= 0.25;
+        }
+
+        // Automated sender detection
+        const senderLower = (email.senderEmail || '').toLowerCase();
+        if (senderLower.includes('noreply') || senderLower.includes('no-reply') ||
+            senderLower.includes('mailer') || senderLower.includes('notifications@')) {
+            // Don't penalize noreply as much if it's an invitation
+            if (highPriorityMatch.length === 0) {
+                score -= 0.2;
+            }
+        }
+
+        // Clamp score between 0 and 1
+        return Math.max(0, Math.min(score, 1.0));
     }
 }
 
